@@ -1,0 +1,10 @@
+# Go build cache (kept in-workspace in this environment)
+.gocache/
+
+# Build outputs
+/dist/
+
+# Local test artifacts
+*.log
+test-*
+.tmp/
