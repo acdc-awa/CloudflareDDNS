@@ -1,0 +1,70 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '发布版本号 Tag (例如 v0.1.0)'
+        required: false
+        default: 'v0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+
+      - name: Run Tests
+        run: go test -v ./...
+
+      - name: Build Multi-Arch Binaries
+        run: |
+          mkdir -p dist
+
+          TAG="${{ github.ref_name }}"
+          if [ -z "$TAG" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag_name || 'v0.1.0' }}"
+          fi
+
+          LDFLAGS="-s -w -X main.version=${TAG}"
+
+          echo "Building linux/amd64..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o dist/ddns-linux-amd64 ./cmd/ddns
+
+          echo "Building linux/arm64..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="${LDFLAGS}" -o dist/ddns-linux-arm64 ./cmd/ddns
+
+          cd dist
+          sha256sum ddns-linux-amd64 > ddns-linux-amd64.sha256
+          sha256sum ddns-linux-arm64 > ddns-linux-arm64.sha256
+          sha256sum ddns-linux-amd64 ddns-linux-arm64 > checksums.txt
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag_name }}
+          files: |
+            dist/ddns-linux-amd64
+            dist/ddns-linux-arm64
+            dist/ddns-linux-amd64.sha256
+            dist/ddns-linux-arm64.sha256
+            dist/checksums.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false
