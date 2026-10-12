@@ -11,6 +11,7 @@ REPO="acdc-awa/CloudflareDDNS"
 BIN_NAME="ddns"
 INSTALL_DIR="/usr/local/bin"
 TARGET_BIN="${INSTALL_DIR}/${BIN_NAME}"
+SELECTED_VERSION=""
 
 # 颜色定义
 RED='\033[0;31m'
@@ -95,8 +96,8 @@ detect_arch() {
 
 # 下载文件工具
 download_file() {
-    local url="$1"
-    local dest="$2"
+    local url="${1:-}"
+    local dest="${2:-}"
 
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "${url}" -o "${dest}"
@@ -116,7 +117,7 @@ select_version() {
         if [[ "${specified_version}" =~ ^[0-9] ]]; then
             specified_version="v${specified_version}"
         fi
-        echo "${specified_version}"
+        SELECTED_VERSION="${specified_version}"
         return 0
     fi
 
@@ -138,7 +139,7 @@ select_version() {
     chosen_version="$(echo "${chosen_version}" | tr -d '[:space:]')"
 
     if [[ -z "${chosen_version}" || "${chosen_version}" == "latest" ]]; then
-        echo "latest"
+        SELECTED_VERSION="latest"
         return 0
     fi
 
@@ -147,15 +148,14 @@ select_version() {
         chosen_version="v${chosen_version}"
     fi
 
-    echo "${chosen_version}"
+    SELECTED_VERSION="${chosen_version}"
 }
 
-# 获取二进制文件（仅从 GitHub Releases 下载）
-get_binary() {
-    local target_arch="$1"
-    local version="$2"
-    local temp_bin
-    temp_bin="$(mktemp /tmp/ddns-bin.XXXXXX)"
+# 下载二进制文件（仅从 GitHub Releases 下载）
+download_binary() {
+    local target_arch="${1:-}"
+    local version="${2:-}"
+    local dest="${3:-}"
 
     local release_url=""
     if [[ "${version}" == "latest" ]]; then
@@ -167,18 +167,17 @@ get_binary() {
     log_info "准备安装版本: ${GREEN}${version}${NC}"
     log_info "正在从 GitHub Release 下载二进制文件: ${release_url} ..."
 
-    if ! download_file "${release_url}" "${temp_bin}"; then
-        rm -f "${temp_bin}"
+    if ! download_file "${release_url}" "${dest}"; then
+        rm -f "${dest}"
         echo ""
         log_error "下载失败！可能原因："
-        echo "  1. GitHub Release 不存在版本 '${version}' 或该 Release 未包含架构 (${target_arch}) 的产物。"
-        echo "  2. 服务器无法连通 GitHub 网络（可尝试配置代理或镜像）。"
-        echo "  3. 该版本的 GitHub Actions 还在构建中，请稍后重试。"
+        echo "  1. GitHub Release 不存在版本 '${version}' 或该 Release 未包含架构 (${target_arch}) 的产物。" >&2
+        echo "  2. 服务器无法连通 GitHub 网络（可尝试配置代理或镜像）。" >&2
+        echo "  3. 该版本的 GitHub Actions 还在构建中，请稍后重试。" >&2
         exit 1
     fi
 
-    chmod +x "${temp_bin}"
-    echo "${temp_bin}"
+    chmod +x "${dest}"
 }
 
 # 执行安装
@@ -195,17 +194,18 @@ do_install() {
     show_banner "${target_arch}"
 
     # 引导用户选择版本
-    local version
-    version="$(select_version "${target_ver}")"
+    select_version "${target_ver}"
+    local version="${SELECTED_VERSION}"
     echo ""
 
-    local bin_source
-    bin_source="$(get_binary "${target_arch}" "${version}")"
+    local temp_bin
+    temp_bin="$(mktemp /tmp/ddns-bin.XXXXXX)"
+    download_binary "${target_arch}" "${version}" "${temp_bin}"
 
     # 安装到系统路径
     log_info "正在安装二进制文件至 ${TARGET_BIN} ..."
-    install -m 755 "${bin_source}" "${TARGET_BIN}"
-    rm -f "${bin_source}"
+    install -m 755 "${temp_bin}" "${TARGET_BIN}"
+    rm -f "${temp_bin}"
 
     log_success "二进制文件安装成功。"
 
@@ -266,15 +266,16 @@ do_update() {
     show_banner "${target_arch}"
     log_info "更新模式："
 
-    local version
-    version="$(select_version "${target_ver}")"
+    select_version "${target_ver}"
+    local version="${SELECTED_VERSION}"
     echo ""
 
-    local bin_source
-    bin_source="$(get_binary "${target_arch}" "${version}")"
+    local temp_bin
+    temp_bin="$(mktemp /tmp/ddns-bin.XXXXXX)"
+    download_binary "${target_arch}" "${version}" "${temp_bin}"
 
-    install -m 755 "${bin_source}" "${TARGET_BIN}"
-    rm -f "${bin_source}"
+    install -m 755 "${temp_bin}" "${TARGET_BIN}"
+    rm -f "${temp_bin}"
 
     if systemctl is-active --quiet ddns.timer; then
         log_info "重启 ddns.timer 定时器..."
